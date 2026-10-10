@@ -45,11 +45,17 @@ class AttendanceController extends Controller
 
         return Attendance::query()
             ->with(['student:id,name,roll_number', 'subject:id,name,code'])
+            ->leftJoin('users as students', 'students.id', '=', 'attendance.user_id')
+            ->select('attendance.*')
             ->when(isset($filters['subject_id']), fn ($query) => $query->where('subject_id', $filters['subject_id']))
             ->when(isset($filters['date']), fn ($query) => $query->whereDate('date', $filters['date']))
             ->when($request->user()->role === 'student', fn ($query) => $query->where('user_id', $request->user()->id))
             ->when(isset($filters['user_id']) && $request->user()->role !== 'student', fn ($query) => $query->where('user_id', $filters['user_id']))
-            ->orderByDesc('date')
+            ->orderByDesc('attendance.date')
+            ->orderByRaw("CASE WHEN students.roll_number IS NULL OR students.roll_number = '' THEN 1 ELSE 0 END")
+            ->orderByRaw('CAST(SUBSTR(students.roll_number, -3) AS INTEGER) ASC')
+            ->orderBy('students.roll_number')
+            ->orderBy('students.name')
             ->paginate(50);
     }
 

@@ -18,6 +18,9 @@ class StudentController extends Controller
             ->where('is_active', true)
             ->when($request->user()->role === 'student', fn ($query) => $query->whereKey($request->user()->id))
             ->select(['id', 'name', 'roll_number'])
+            ->orderByRaw("CASE WHEN roll_number IS NULL OR roll_number = '' THEN 1 ELSE 0 END")
+            ->orderByRaw('CAST(SUBSTR(roll_number, -3) AS INTEGER) ASC')
+            ->orderBy('roll_number')
             ->orderBy('name')
             ->paginate(100);
     }

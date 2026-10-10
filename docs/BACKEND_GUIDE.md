@@ -40,13 +40,22 @@ The migrations create the ClassDesk tables: `users`, `subjects`, `attendance`, `
 
 Foreign keys connect attendance to a student and subject; notes to a subject and uploader; assignments to a lab and subject; exams to a subject and creator; and notices to their creator. A unique key prevents more than one attendance record for the same student, subject, and date. Uploaded files are stored privately under Laravel's local storage disk; their paths are not returned in API JSON.
 
-The roster sync can create accounts from the roster sheet. It assigns random unusable password hashes to new accounts and preserves existing password hashes. An administrator must set passwords for new accounts through trusted tooling. For a single account, use Tinker; student and CR accounts need their unique roll number:
+The roster sync can create accounts from the roster sheet. It assigns random unusable password hashes to new accounts and preserves existing password hashes. An administrator must set passwords for new accounts through trusted tooling. Make sure the `.env` database settings point to the same database you inspect in phpMyAdmin. The `id` is generated automatically; student and CR accounts also need a unique `roll_number`. Check migration status before provisioning:
 
 ```powershell
+php artisan config:clear
 php artisan migrate:status
 ```
 
-Provision an account with Tinker. Replace the sample values and use a strong password:
+If the migration that adds `roll_number` is pending, apply it before creating student accounts:
+
+```powershell
+php artisan migrate --path=database/migrations/2026_10_01_000000_add_frontend_profile_and_notice_fields.php
+```
+
+Review and back up an existing database before applying other pending migrations; one later migration removes legacy subjects and associated files.
+
+Open Tinker to create a new account. Replace the sample values and use a strong, unique password:
 
 ```powershell
 php artisan tinker
@@ -56,13 +65,29 @@ php artisan tinker
 App\Models\User::create([
   'name' => 'Student Name',
   'email' => 'student@example.edu',
-    'password' => 'Replace-With-A-Strong-Unique-Password',
+  'password' => 'Replace-With-A-Strong-Unique-Password',
   'role' => 'student',
   'roll_number' => '22601222274',
 ]);
 ```
 
-Allowed roles are `student`, `cr`, and `teacher`. Laravel hashes passwords automatically. There is intentionally no public registration endpoint; provision and disable accounts through trusted administrative tooling such as Tinker or a future admin-only workflow.
+To find an existing account, run:
+
+```php
+$student = App\Models\User::where('email', 'student@example.edu')->firstOrFail();
+```
+
+If `firstOrFail()` reports that no model was found, that email is not in the database Laravel is currently using. Check `DB_DATABASE` in `.env` against phpMyAdmin, then create the account if it is new.
+
+To set a password for just that account, use the model so Laravel's `hashed` password cast is applied:
+
+```php
+$student = App\Models\User::where('email', 'student@example.edu')->firstOrFail();
+$student->password = 'Replace-With-A-Strong-Unique-Password';
+$student->save();
+```
+
+Do not use `App\Models\User::query()->update([...])` to reset one student's password: without a `where` condition it updates every user. Allowed roles are `student`, `cr`, and `teacher`. There is intentionally no public registration endpoint; provision and disable accounts through trusted administrative tooling such as Tinker or a future admin-only workflow.
 
 ## API Overview
 
@@ -76,17 +101,17 @@ All module endpoints require a Sanctum bearer token. Login validates email and p
 | `POST /api/logout` | Authenticated | Revoke the current token |
 | `GET /api/subjects` | Authenticated | List subjects |
 | `POST /api/subjects` | CR | Create a subject |
-| `GET /api/students` | Authenticated | List students; student accounts receive only their own profile |
+| `GET /api/students` | Authenticated | List students in ascending order by numeric last three roll-number digits; student accounts receive only their own profile |
 | `POST /api/students/sync` | CR | Sync the student/CR/teacher roster and teacher-subject mappings |
 | `GET /api/attendance-thresholds` | Authenticated | List subject attendance thresholds |
 | `PUT /api/attendance-thresholds/{subject}` | CR | Save a subject's minimum attendance percentage |
-| `GET, POST /api/attendance` | Read: all roles; write: CR | View or manually mark attendance |
+| `GET, POST /api/attendance` | Read: all roles; write: CR | View attendance newest-date-first, with students in ascending roll-number suffix order within each date, or manually mark attendance |
 | `POST /api/attendance/sync` | CR | Sync attendance from the configured Google Sheet |
 | `GET, POST /api/notes` | Read: all roles; write: CR | List or upload notes |
 | `GET /api/notes/{id}/download` | Authenticated | Download a note |
 | `GET, POST /api/labs` | Read: all roles; write: CR | View or manage labs |
 | `GET, POST /api/lab-assignments` | Read: all roles; write: CR | View or manage assignments |
-| `GET, POST /api/exams` | Read: all roles; write: CR | View or manage exams |
+| `GET, POST /api/exams` | Read: all roles; write: CR | View or manage exams; returned `exam_date` values use `DD,MM,YYYY` format |
 | `POST /api/exams/{id}/seating-plan` | CR | Upload or replace an exam seating PDF |
 | `GET /api/exams/{id}/seating-plan` | Authenticated | Download the exam seating PDF |
 | `GET, POST /api/notices` | Read: all roles; write: CR | View or manage notices |

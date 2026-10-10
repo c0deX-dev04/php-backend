@@ -18,7 +18,7 @@ class Exam extends Model
 
     protected function casts(): array
     {
-        return ['exam_date' => 'date'];
+        return ['exam_date' => 'date:d,m,Y'];
     }
 
     public function getHasSeatingPlanAttribute(): bool
