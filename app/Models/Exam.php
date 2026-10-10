@@ -12,9 +12,18 @@ class Exam extends Model
 
     protected $fillable = ['subject_id', 'created_by', 'type', 'exam_date', 'start_time', 'end_time', 'room'];
 
+    protected $hidden = ['seating_attachment'];
+
+    protected $appends = ['has_seating_plan'];
+
     protected function casts(): array
     {
         return ['exam_date' => 'date'];
+    }
+
+    public function getHasSeatingPlanAttribute(): bool
+    {
+        return filled($this->seating_attachment);
     }
 
     public function subject(): BelongsTo

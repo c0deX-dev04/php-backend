@@ -2,24 +2,29 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\Lab;
+use App\Models\Subject;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $subjects = [
+            ['name' => 'PHP with MySQL', 'code' => 'PHP'],
+            ['name' => 'Object Oriented Programming with Java', 'code' => 'JAVA'],
+            ['name' => 'Financial Management', 'code' => 'FIN_MGMT'],
+            ['name' => 'Entrepreneurship', 'code' => 'ENTREPRENEURSHIP'],
+            ['name' => 'PHP with MySQL Lab', 'code' => 'PHP_LAB'],
+            ['name' => 'Object Oriented Programming with Java Lab', 'code' => 'JAVA_LAB'],
+        ];
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        foreach ($subjects as $subject) {
+            Subject::query()->updateOrCreate(['code' => $subject['code']], ['name' => $subject['name']]);
+        }
+
+        foreach (['PHP with MySQL Lab', 'Java Programming Lab'] as $name) {
+            Lab::query()->firstOrCreate(['name' => $name]);
+        }
     }
 }

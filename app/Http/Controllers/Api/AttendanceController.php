@@ -44,7 +44,7 @@ class AttendanceController extends Controller
         ]);
 
         return Attendance::query()
-            ->with(['student:id,name', 'subject:id,name,code'])
+            ->with(['student:id,name,roll_number', 'subject:id,name,code'])
             ->when(isset($filters['subject_id']), fn ($query) => $query->where('subject_id', $filters['subject_id']))
             ->when(isset($filters['date']), fn ($query) => $query->whereDate('date', $filters['date']))
             ->when($request->user()->role === 'student', fn ($query) => $query->where('user_id', $request->user()->id))
@@ -56,7 +56,7 @@ class AttendanceController extends Controller
     public function store(Request $request): Attendance
     {
         $data = $request->validate([
-            'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'student')],
+            'user_id' => ['required', Rule::exists('users', 'id')->where(fn (Builder $query) => $query->whereIn('role', ['student', 'cr'])->where('is_active', true))],
             'subject_id' => ['required', 'integer', 'exists:subjects,id'],
             'date' => ['required', 'date_format:Y-m-d'],
             'status' => ['required', Rule::in(['present', 'absent'])],
@@ -75,13 +75,13 @@ class AttendanceController extends Controller
     {
         abort_if($request->user()->role === 'student' && $attendance->user_id !== $request->user()->id, 404);
 
-        return $attendance->load(['student:id,name', 'subject:id,name,code']);
+        return $attendance->load(['student:id,name,roll_number', 'subject:id,name,code']);
     }
 
     public function update(Request $request, Attendance $attendance): Attendance
     {
         $data = $request->validate([
-            'user_id' => ['required', Rule::exists('users', 'id')->where('role', 'student')],
+            'user_id' => ['required', Rule::exists('users', 'id')->where(fn (Builder $query) => $query->whereIn('role', ['student', 'cr'])->where('is_active', true))],
             'subject_id' => ['required', 'integer', 'exists:subjects,id'],
             'date' => ['required', 'date_format:Y-m-d'],
             'status' => ['required', Rule::in(['present', 'absent'])],

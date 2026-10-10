@@ -17,24 +17,24 @@ class AuthController extends Controller
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
-            'role' => ['required', Rule::enum(UserRole::class)],
+            'role' => ['sometimes', Rule::enum(UserRole::class)],
         ]);
 
         $user = User::query()->where('email', $credentials['email'])->first();
 
-        if (! $user || ! Hash::check($credentials['password'], $user->password) || $user->role !== $credentials['role']) {
+        if (! $user || ! $user->is_active || ! Hash::check($credentials['password'], $user->password) || (isset($credentials['role']) && $user->role !== $credentials['role'])) {
             return response()->json(['message' => 'Invalid credentials or selected role.'], 401);
         }
 
         return response()->json([
             'token' => $user->createToken('classdesk-api')->plainTextToken,
-            'user' => $user->only(['id', 'name', 'email', 'role']),
+            'user' => $user->only(['id', 'name', 'email', 'role', 'roll_number']),
         ]);
     }
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['data' => $request->user()->only(['id', 'name', 'email', 'role'])]);
+        return response()->json(['data' => $request->user()->only(['id', 'name', 'email', 'role', 'roll_number'])]);
     }
 
     public function logout(Request $request): JsonResponse

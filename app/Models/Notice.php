@@ -10,9 +10,21 @@ class Notice extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['title', 'content', 'attachment', 'created_by'];
+    protected $fillable = ['title', 'content', 'category', 'pinned', 'attachment', 'created_by'];
 
     protected $hidden = ['attachment'];
+
+    protected $appends = ['has_attachment'];
+
+    protected function casts(): array
+    {
+        return ['pinned' => 'boolean'];
+    }
+
+    public function getHasAttachmentAttribute(): bool
+    {
+        return filled($this->attachment);
+    }
 
     public function creator(): BelongsTo
     {

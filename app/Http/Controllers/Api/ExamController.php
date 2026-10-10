@@ -5,7 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Enums\ExamType;
 use App\Http\Controllers\Controller;
 use App\Models\Exam;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class ExamController extends Controller
@@ -45,9 +48,40 @@ class ExamController extends Controller
 
     public function destroy(Exam $exam)
     {
+        if ($exam->seating_attachment) {
+            Storage::disk('local')->delete($exam->seating_attachment);
+        }
+
         $exam->delete();
 
         return response()->noContent();
+    }
+
+    public function uploadSeatingPlan(Request $request, Exam $exam): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf', 'max:10240'],
+        ]);
+
+        $oldPath = $exam->seating_attachment;
+        $exam->seating_attachment = $data['file']->store('exam-seating');
+        $exam->save();
+
+        if ($oldPath) {
+            Storage::disk('local')->delete($oldPath);
+        }
+
+        return response()->json(['message' => 'Seating plan uploaded.', 'has_seating_plan' => true]);
+    }
+
+    public function downloadSeatingPlan(Exam $exam)
+    {
+        abort_unless($exam->seating_attachment && Storage::disk('local')->exists($exam->seating_attachment), 404);
+
+        return Storage::disk('local')->download(
+            $exam->seating_attachment,
+            Str::slug($exam->subject?->name.'-'.$exam->type.'-seating').'.pdf',
+        );
     }
 
     private function rules(): array

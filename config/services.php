@@ -36,9 +36,18 @@ return [
     ],
 
     'google_sheets' => [
-        'api_key' => env('GOOGLE_SHEETS_API_KEY'),
-        'spreadsheet_id' => env('GOOGLE_SHEETS_SPREADSHEET_ID'),
-        'range' => env('GOOGLE_SHEETS_RANGE', 'Attendance!A:D'),
+        'credentials_path' => env('GOOGLE_APPLICATION_CREDENTIALS'),
+        'attendance' => [
+            'spreadsheet_id' => env('GOOGLE_SHEETS_ATTENDANCE_SPREADSHEET_ID'),
+            'range' => env('GOOGLE_SHEETS_ATTENDANCE_RANGE', 'CLASS Attendance!B6:ZZ'),
+            'subject_code' => env('GOOGLE_SHEETS_ATTENDANCE_SUBJECT_CODE', 'PHP'),
+            'date_format' => env('GOOGLE_SHEETS_ATTENDANCE_DATE_FORMAT', 'd/m'),
+            'year' => (int) env('GOOGLE_SHEETS_ATTENDANCE_YEAR', date('Y')),
+        ],
+        'roster' => [
+            'spreadsheet_id' => env('GOOGLE_SHEETS_ROSTER_SPREADSHEET_ID'),
+            'range' => env('GOOGLE_SHEETS_ROSTER_RANGE', 'Roster!A1:E'),
+        ],
     ],
 
 ];

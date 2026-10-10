@@ -20,6 +20,8 @@ class NoticeController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'content' => ['required', 'string'],
+            'category' => ['sometimes', 'string', 'max:80'],
+            'pinned' => ['sometimes', 'boolean'],
             'attachment' => ['sometimes', 'file', 'mimes:pdf', 'max:10240'],
         ]);
 
@@ -42,6 +44,8 @@ class NoticeController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'content' => ['required', 'string'],
+            'category' => ['sometimes', 'string', 'max:80'],
+            'pinned' => ['sometimes', 'boolean'],
             'attachment' => ['sometimes', 'file', 'mimes:pdf', 'max:10240'],
         ]);
 

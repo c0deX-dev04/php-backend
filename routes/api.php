@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AttendanceController;
+use App\Http\Controllers\Api\AttendanceThresholdController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExamController;
@@ -8,6 +9,7 @@ use App\Http\Controllers\Api\LabAssignmentController;
 use App\Http\Controllers\Api\LabController;
 use App\Http\Controllers\Api\NoteController;
 use App\Http\Controllers\Api\NoticeController;
+use App\Http\Controllers\Api\StudentController;
 use App\Http\Controllers\Api\SubjectController;
 use Illuminate\Support\Facades\Route;
 
@@ -18,8 +20,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/dashboard', DashboardController::class);
+    Route::get('/students', [StudentController::class, 'index']);
+    Route::post('/students/sync', [StudentController::class, 'sync'])->middleware('role:cr');
+    Route::get('/attendance-thresholds', [AttendanceThresholdController::class, 'index']);
+    Route::put('/attendance-thresholds/{subject}', [AttendanceThresholdController::class, 'update'])->middleware('role:cr');
 
     Route::apiResource('subjects', SubjectController::class)->only(['index', 'show']);
+    Route::apiResource('subjects', SubjectController::class)
+        ->only(['store'])
+        ->middleware('role:cr');
 
     Route::post('/attendance/sync', [AttendanceController::class, 'sync'])->middleware('role:cr');
     Route::apiResource('attendance', AttendanceController::class)->only(['index', 'show']);
@@ -44,6 +53,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('role:cr');
 
     Route::apiResource('exams', ExamController::class)->only(['index', 'show']);
+    Route::post('/exams/{exam}/seating-plan', [ExamController::class, 'uploadSeatingPlan'])->middleware('role:cr');
+    Route::get('/exams/{exam}/seating-plan', [ExamController::class, 'downloadSeatingPlan']);
     Route::apiResource('exams', ExamController::class)
         ->only(['store', 'update', 'destroy'])
         ->middleware('role:cr');
