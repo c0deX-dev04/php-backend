@@ -11,48 +11,86 @@ use RuntimeException;
 
 class AttendanceSheetSyncService
 {
-    public function sync(): int
+    public function sync(): array
     {
         $spreadsheetId = config('services.google_sheets.attendance.spreadsheet_id');
         $range = config('services.google_sheets.attendance.range');
+        $activationRange = config('services.google_sheets.attendance.activation_range');
         $subjectCode = strtoupper((string) config('services.google_sheets.attendance.subject_code'));
 
-        if (! $spreadsheetId || ! $range || ! $subjectCode) {
+        if (! $spreadsheetId || ! $range || ! $activationRange || ! $subjectCode) {
             throw new RuntimeException('Google Sheets attendance is not configured.');
         }
 
         $rows = app(GoogleSheetsReader::class)->values($spreadsheetId, $range);
 
         if (! is_array($rows) || count($rows) < 2) {
-            return 0;
+            return [
+                'records_synced' => 0,
+                'students_processed' => 0,
+                'active_dates' => 0,
+            ];
         }
 
         $headers = array_shift($rows);
         if (strtolower(trim((string) ($headers[0] ?? ''))) !== 'roll number'
             || strtolower(trim((string) ($headers[1] ?? ''))) !== 'student'
-            || count($headers) < 7) {
+            || count($headers) < 6) {
             throw ValidationException::withMessages([
-                'sheet' => ['Expected Roll Number in column B, Student in column C, and attendance dates from column H.'],
+                'sheet' => ['Expected Roll Number in column B, Student in column C, summary columns D-F, and attendance dates from column G.'],
             ]);
         }
 
-        $students = User::query()->whereIn('role', ['student', 'cr'])->where('is_active', true)
-            ->get()->keyBy(fn (User $user) => trim((string) $user->roll_number));
+        $activationRows = app(GoogleSheetsReader::class)->values($spreadsheetId, $activationRange);
+        $activationRow = $activationRows[0] ?? [];
+
+        $dateColumns = [];
+        $columnCount = max(count($headers), count($activationRow));
+        for ($index = 5; $index < $columnCount; $index++) {
+            $activationValue = $activationRow[$index] ?? null;
+            if ($activationValue === null || (is_string($activationValue) && trim($activationValue) === '')) {
+                continue;
+            }
+
+            $activationValue = is_bool($activationValue)
+                ? ($activationValue ? 'TRUE' : 'FALSE')
+                : strtoupper(trim((string) $activationValue));
+
+            if (! in_array($activationValue, ['TRUE', 'FALSE'], true)) {
+                throw ValidationException::withMessages([
+                    'sheet' => ['Row 5, column '.$this->columnLabel($index + 2).' must contain an activation checkbox.'],
+                ]);
+            }
+
+            if ($activationValue === 'FALSE') {
+                continue;
+            }
+
+            $date = $this->parseDate(trim((string) ($headers[$index] ?? '')));
+            if (! $date) {
+                throw ValidationException::withMessages([
+                    'sheet' => ['Active column '.$this->columnLabel($index + 2).' does not contain a valid attendance date in row 6.'],
+                ]);
+            }
+
+            $dateColumns[$index] = $date;
+        }
+
         $subject = Subject::query()->where('code', $subjectCode)->first();
         if (! $subject) {
             throw new RuntimeException("Subject code {$subjectCode} is not in the database.");
         }
 
-        $dateColumns = [];
-        foreach (array_slice($headers, 6, null, true) as $index => $header) {
-            $date = $this->parseDate(trim((string) $header));
-            if (! $date) {
-                throw ValidationException::withMessages([
-                    'sheet' => ['Column '.($index + 2).' does not contain a valid attendance date.'],
-                ]);
-            }
-            $dateColumns[$index] = $date;
+        if ($dateColumns === []) {
+            return [
+                'records_synced' => 0,
+                'students_processed' => 0,
+                'active_dates' => 0,
+            ];
         }
+
+        $students = User::query()->whereIn('role', ['student', 'cr'])->where('is_active', true)
+            ->get()->keyBy(fn (User $user) => trim((string) $user->roll_number));
 
         $records = [];
 
@@ -71,14 +109,18 @@ class AttendanceSheetSyncService
 
             foreach ($dateColumns as $columnIndex => $date) {
                 $value = $row[$columnIndex] ?? null;
-                $status = $value === true || strtoupper(trim((string) $value)) === 'TRUE'
-                    ? 'present'
-                    : ($value === false || strtoupper(trim((string) $value)) === 'FALSE' ? 'absent' : null);
-
-                if ($status === null) {
+                if ($value === null || (is_string($value) && trim($value) === '')) {
                     continue;
                 }
 
+                $checkboxValue = is_bool($value) ? ($value ? 'TRUE' : 'FALSE') : strtoupper(trim((string) $value));
+                if (! in_array($checkboxValue, ['TRUE', 'FALSE'], true)) {
+                    throw ValidationException::withMessages([
+                        'sheet' => ["Row {$line}, column ".$this->columnLabel($columnIndex + 2).' must contain a checked or unchecked checkbox.'],
+                    ]);
+                }
+
+                $status = $checkboxValue === 'TRUE' ? 'present' : 'absent';
                 $studentId = $students->get($rollNumber)->id;
                 $records["{$studentId}:{$date}"] = [
                     'user_id' => $studentId,
@@ -92,7 +134,11 @@ class AttendanceSheetSyncService
         }
 
         if ($records === []) {
-            return 0;
+            return [
+                'records_synced' => 0,
+                'students_processed' => 0,
+                'active_dates' => count(array_unique($dateColumns)),
+            ];
         }
 
         DB::transaction(fn () => DB::table('attendance')->upsert(
@@ -101,7 +147,23 @@ class AttendanceSheetSyncService
             ['status', 'updated_at'],
         ));
 
-        return count($records);
+        return [
+            'records_synced' => count($records),
+            'students_processed' => count(array_unique(array_column($records, 'user_id'))),
+            'active_dates' => count(array_unique(array_column($records, 'date'))),
+        ];
+    }
+
+    private function columnLabel(int $column): string
+    {
+        $label = '';
+        while ($column > 0) {
+            $column--;
+            $label = chr(65 + ($column % 26)).$label;
+            $column = intdiv($column, 26);
+        }
+
+        return $label;
     }
 
     private function parseDate(string $value): ?string
@@ -120,4 +182,4 @@ class AttendanceSheetSyncService
         return $date->format('Y-m-d');
     }
 }
-#test
+// test

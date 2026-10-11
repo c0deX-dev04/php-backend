@@ -133,7 +133,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:8000/api/subjects `
   -Headers @{ Authorization = "Bearer $($login.token)"; Accept = 'application/json' }
 ```
 
-Attendance payloads use `user_id`, `subject_id`, `date` (`YYYY-MM-DD`), and `status` (`present` or `absent`). Exam types are `CA1`, `CA2`, `CA3`, and `semester`. Note uploads use multipart fields `subject_id`, `title`, and `file`; allowed files are PDF, PPT/PPTX, and DOC/DOCX up to 10 MB. Notice attachments are optional PDFs up to 10 MB.
+Attendance list requests accept optional `subject_id`, `user_id`, and `date` (`YYYY-MM-DD`) query parameters, return a Laravel paginator with 50 rows per page, and include each record's student and subject. Each row is one imported date with `status` (`present` or `absent`). The frontend derives the spreadsheet's YES count, NO count, and percentage per student/subject from these rows: YES is present records, NO is absent records, and percentage is `round(YES / (YES + NO) * 100)`. Subjects with no imported dates are excluded from class defaulter rows. Student tokens are always scoped to their own attendance, even if they supply another `user_id`. Manual create/update bodies use `user_id`, `subject_id`, `date` (`YYYY-MM-DD`), and `status` (`present` or `absent`); duplicate student/subject/date records are rejected. Exam types are `CA1`, `CA2`, `CA3`, and `semester`. Note uploads use multipart fields `subject_id`, `title`, and `file`; allowed files are PDF, PPT/PPTX, and DOC/DOCX up to 10 MB. Notice attachments are optional PDFs up to 10 MB.
 
 ## Optional Google Sheets Sync
 
@@ -144,7 +144,8 @@ Set the secure key path and PHP attendance sheet settings in the backend `.env`,
 ```dotenv
 GOOGLE_APPLICATION_CREDENTIALS=C:\secure\classdesk-sheets-service-account.json
 GOOGLE_SHEETS_ATTENDANCE_SPREADSHEET_ID=16pzODiFjSYfMJOJWRug6Ev_QAEd9j9nWbNVlp0yorZM
-GOOGLE_SHEETS_ATTENDANCE_RANGE=CLASS Attendance!B6:ZZ
+GOOGLE_SHEETS_ATTENDANCE_RANGE="'CLASS Attendance'!B6:ZZ"
+GOOGLE_SHEETS_ATTENDANCE_ACTIVATION_RANGE="'CLASS Attendance'!B5:ZZ5"
 GOOGLE_SHEETS_ATTENDANCE_SUBJECT_CODE=PHP
 GOOGLE_SHEETS_ATTENDANCE_DATE_FORMAT=d/m
 GOOGLE_SHEETS_ATTENDANCE_YEAR=2026
@@ -163,7 +164,30 @@ $cr->save();
 
 Replace the CR email with one from the roster. New accounts receive random unusable password hashes; passwords are set through trusted administration and never stored in Sheets. After the CR can sign in, use the Attendance page's **Sync roster** action for later updates.
 
-The provided attendance sheet is the PHP demo; no other subject sheets are configured yet. Its row 6 has `Roll Number` in column B and `Student` in column C; checkbox dates begin in column H. Data starts on row 7. The sync uses the configured subject code (`PHP` initially), resolves each roll number against the roster, maps checked boxes to `present`, unchecked boxes to `absent`, and ignores blank cells. Date headings such as `11/08` are parsed as day/month using the configured year. Change `GOOGLE_SHEETS_ATTENDANCE_DATE_FORMAT` and year if the sheet uses another convention. Authenticate as a CR and call `POST /api/attendance/sync`. Repeated student/subject/date records are updated; records not represented in the sheet are not deleted. The other five subjects appear in the database and frontend but have no Google attendance source until their sheets are configured.
+To connect the class attendance sheet:
+
+1. Keep the sheet tab name and layout aligned with the configured ranges. In the screenshot, the tab is `CLASS Attendance`: row 5 has one activation checkbox per date beginning in column G; row 6 has `Roll Number` in B, `Student` in C, summary headings `YES`, `NO`, `%` in D-F, and date headings in G onward; student rows begin at row 7. Columns D-F are summary values and are not imported.
+2. Set each row 5 activation checkbox to `TRUE` only when that date’s attendance is finalized and should be imported. `FALSE` means skip the entire date column. In each active date column, the student attendance checkboxes use `TRUE` for present and `FALSE` for absent. Keep roll numbers in column B identical to active student/CR account roll numbers.
+3. Share the spreadsheet with the service-account email as a Viewer. Put the JSON key outside the repository and set its path in `GOOGLE_APPLICATION_CREDENTIALS`. Copy the spreadsheet ID from its Google Sheets URL into the backend `.env`; do not use the sample ID if it is not this spreadsheet.
+4. Configure both ranges with the same starting column so activation and attendance indexes line up. Quote the tab name because it contains a space. For the screenshot layout, dates start in G immediately after the summary columns:
+
+   ```dotenv
+   GOOGLE_APPLICATION_CREDENTIALS=C:\secure\classdesk-sheets-service-account.json
+   GOOGLE_SHEETS_ATTENDANCE_SPREADSHEET_ID=copy-the-id-from-the-sheet-url
+   GOOGLE_SHEETS_ATTENDANCE_RANGE="'CLASS Attendance'!B6:ZZ"
+   GOOGLE_SHEETS_ATTENDANCE_ACTIVATION_RANGE="'CLASS Attendance'!B5:ZZ5"
+   GOOGLE_SHEETS_ATTENDANCE_SUBJECT_CODE=PHP
+   GOOGLE_SHEETS_ATTENDANCE_DATE_FORMAT=d/m
+   GOOGLE_SHEETS_ATTENDANCE_YEAR=2026
+   ```
+
+   The screenshot shows `BCAC501` above the attendance grid. Set `GOOGLE_SHEETS_ATTENDANCE_SUBJECT_CODE=BCAC501` if that is the subject’s actual code, and make sure a subject with that exact code exists in the database first (create it as a CR through `POST /api/subjects` if needed). The sample database defaults to `PHP`, which must not be used for a different subject.
+5. Ensure the roster sync or trusted account provisioning has created active student accounts with matching roll numbers, then run `php artisan config:clear` in the backend directory. Restart `php artisan serve` if it is already running.
+6. Sign in to the frontend as a CR, open Attendance, and click **Sync active attendance**. The frontend sends the authenticated request to `POST /api/attendance/sync`; a successful response includes `records_synced`. You can also call that endpoint with a CR bearer token and no body. Refreshing the page should show the imported rows.
+
+Only checked row 5 date columns are imported. Unchecked or blank activation cells are ignored; their attendance values are not imported, and previously imported records for those dates remain unchanged. The sheet's D/E/F YES, NO, and percentage cells are summaries and are recalculated by the frontend from imported dates; for example, one YES and five NO gives `1 / 6 = 16.67%`, displayed as `17%`. Blank student attendance cells are ignored, while checkbox `FALSE` is imported as `absent`. Any malformed activation checkbox, invalid active date heading, invalid attendance checkbox in an active date, or unknown roll number rejects the whole sync with `422` and writes nothing. Date headings such as `11/08` are parsed as day/month using the configured year; update the year for a new calendar year, or use full dates and set the matching date format. A successful sync response reports `students_processed`, `active_dates`, and `records_synced`; for 56 students with 6 active dates, expect approximately 336 student/date attendance entries. These are not 336 students. Matching student/subject/date rows are upserted using the unique key, so a repeat sync updates the same rows rather than adding duplicates. Records not represented by an active sheet column are not deleted. Attendance reports remain cumulative across all imported dates/months. Invalid sheet content returns `422`; a Google API request failure returns `502`; missing credentials/configuration or an unknown configured subject returns `503`. The other subjects need their own configured Google Sheet sync before their attendance is imported.
+
+The frontend signs in through `/api/login`, stores the returned bearer token, and its shared API client adds `Authorization: Bearer <token>` to the sync request. After a successful sync the Attendance page refreshes attendance, students, and subjects. Do not call Google Sheets directly from browser code or put the service-account key in frontend environment variables.
 
 The roster range must start with a header row containing `email`, `name`, `role`, `roll_number`, and `subject_codes`. Use one row per account; roles are `student`, `cr`, or `teacher`. Student and CR rows require roll numbers. Teacher `subject_codes` are comma- or semicolon-separated and must reference existing subject codes. For example, assign the same PHP teacher to `PHP,PHP_LAB` and the Java teacher to `JAVA,JAVA_LAB`. The other teachers map to `FIN_MGMT` and `ENTREPRENEURSHIP`. Run `POST /api/students/sync` as a CR after configuring the roster ID. Accounts missing from the next successful roster sync are deactivated, not deleted. Set passwords for newly imported accounts through trusted administration; passwords and password hashes do not belong in the sheet.
 

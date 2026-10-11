@@ -39,7 +39,8 @@ return [
         'credentials_path' => env('GOOGLE_APPLICATION_CREDENTIALS'),
         'attendance' => [
             'spreadsheet_id' => env('GOOGLE_SHEETS_ATTENDANCE_SPREADSHEET_ID'),
-            'range' => env('GOOGLE_SHEETS_ATTENDANCE_RANGE', 'CLASS Attendance!B6:ZZ'),
+            'range' => env('GOOGLE_SHEETS_ATTENDANCE_RANGE', "'CLASS Attendance'!B6:ZZ"),
+            'activation_range' => env('GOOGLE_SHEETS_ATTENDANCE_ACTIVATION_RANGE', "'CLASS Attendance'!B5:ZZ5"),
             'subject_code' => env('GOOGLE_SHEETS_ATTENDANCE_SUBJECT_CODE', 'PHP'),
             'date_format' => env('GOOGLE_SHEETS_ATTENDANCE_DATE_FORMAT', 'd/m'),
             'year' => (int) env('GOOGLE_SHEETS_ATTENDANCE_YEAR', date('Y')),

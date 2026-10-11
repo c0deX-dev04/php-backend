@@ -7,6 +7,7 @@ use App\Models\Exam;
 use App\Models\Note;
 use App\Models\Subject;
 use App\Models\User;
+use App\Services\GoogleSheetsApiException;
 use App\Services\GoogleSheetsReader;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -186,19 +187,90 @@ class ClassDeskApiTest extends TestCase
         $subject = Subject::query()->create(['name' => 'PHP', 'code' => 'PHP']);
         config([
             'services.google_sheets.attendance.spreadsheet_id' => 'attendance-sheet',
-            'services.google_sheets.attendance.range' => 'CLASS Attendance!B6:ZZ',
+            'services.google_sheets.attendance.range' => "'CLASS Attendance'!B6:ZZ",
+            'services.google_sheets.attendance.activation_range' => "'CLASS Attendance'!B5:ZZ5",
             'services.google_sheets.attendance.subject_code' => 'PHP',
             'services.google_sheets.attendance.date_format' => 'd/m',
             'services.google_sheets.attendance.year' => 2026,
         ]);
-        $this->mock(GoogleSheetsReader::class)
-            ->shouldReceive('values')
-            ->once()
-            ->with('attendance-sheet', 'CLASS Attendance!B6:ZZ')
+        $reader = $this->mock(GoogleSheetsReader::class);
+        $reader->shouldReceive('values')
+            ->twice()
+            ->with('attendance-sheet', "'CLASS Attendance'!B6:ZZ")
             ->andReturn([
-                ['Roll Number', 'Student', 'YES', 'NO', '%', '', '11/08', '14/08'],
-                ['22601222274', 'Demo Student', '1', '1', '50%', '', 'TRUE', 'FALSE'],
+                ['Roll Number', 'Student', 'YES', 'NO', '%', '11/08', '14/08'],
+                ['22601222274', 'Demo Student', '1', '1', '50%', 'TRUE', 'FALSE'],
             ]);
+        $reader->shouldReceive('values')
+            ->twice()
+            ->with('attendance-sheet', "'CLASS Attendance'!B5:ZZ5")
+            ->andReturn([['', '', '', '', '', 'TRUE', 'TRUE']]);
+        Sanctum::actingAs($cr);
+
+        $this->postJson('/api/attendance/sync')
+            ->assertOk()
+            ->assertJsonPath('records_synced', 2)
+            ->assertJsonPath('students_processed', 1)
+            ->assertJsonPath('active_dates', 2);
+
+        $this->postJson('/api/attendance/sync')
+            ->assertOk()
+            ->assertJsonPath('records_synced', 2)
+            ->assertJsonPath('students_processed', 1)
+            ->assertJsonPath('active_dates', 2);
+
+        $this->assertDatabaseCount('attendance', 2);
+
+        $this->assertDatabaseHas('attendance', [
+            'user_id' => $student->id,
+            'subject_id' => $subject->id,
+            'date' => '2026-08-11',
+            'status' => 'present',
+        ]);
+        $this->assertSame(
+            'absent',
+            Attendance::query()
+                ->where('user_id', $student->id)
+                ->where('subject_id', $subject->id)
+                ->whereDate('date', '2026-08-14')
+                ->value('status'),
+        );
+    }
+
+    public function test_attendance_sync_imports_only_activated_columns_and_preserves_inactive_dates(): void
+    {
+        $cr = User::factory()->create(['role' => 'cr']);
+        $student = User::factory()->create([
+            'role' => 'student',
+            'roll_number' => '22601222274',
+        ]);
+        $subject = Subject::query()->create(['name' => 'PHP', 'code' => 'PHP']);
+        Attendance::query()->create([
+            'user_id' => $student->id,
+            'subject_id' => $subject->id,
+            'date' => '2026-08-14',
+            'status' => 'absent',
+        ]);
+        config([
+            'services.google_sheets.attendance.spreadsheet_id' => 'attendance-sheet',
+            'services.google_sheets.attendance.range' => "'CLASS Attendance'!B6:ZZ",
+            'services.google_sheets.attendance.activation_range' => "'CLASS Attendance'!B5:ZZ5",
+            'services.google_sheets.attendance.subject_code' => 'PHP',
+            'services.google_sheets.attendance.date_format' => 'd/m',
+            'services.google_sheets.attendance.year' => 2026,
+        ]);
+        $reader = $this->mock(GoogleSheetsReader::class);
+        $reader->shouldReceive('values')
+            ->once()
+            ->with('attendance-sheet', "'CLASS Attendance'!B6:ZZ")
+            ->andReturn([
+                ['Roll Number', 'Student', 'YES', 'NO', '%', '11/08', '14/08', '25/08'],
+                ['22601222274', 'Demo Student', '2', '1', '67%', 'TRUE', 'TRUE', 'FALSE'],
+            ]);
+        $reader->shouldReceive('values')
+            ->once()
+            ->with('attendance-sheet', "'CLASS Attendance'!B5:ZZ5")
+            ->andReturn([['', '', '', '', '', 'TRUE', 'FALSE', 'TRUE']]);
         Sanctum::actingAs($cr);
 
         $this->postJson('/api/attendance/sync')
@@ -211,12 +283,78 @@ class ClassDeskApiTest extends TestCase
             'date' => '2026-08-11',
             'status' => 'present',
         ]);
+        $this->assertSame(
+            'absent',
+            Attendance::query()
+                ->where('user_id', $student->id)
+                ->where('subject_id', $subject->id)
+                ->whereDate('date', '2026-08-14')
+                ->value('status'),
+        );
         $this->assertDatabaseHas('attendance', [
             'user_id' => $student->id,
             'subject_id' => $subject->id,
-            'date' => '2026-08-14',
+            'date' => '2026-08-25',
             'status' => 'absent',
         ]);
+    }
+
+    public function test_attendance_sync_rejects_unrecognized_checkbox_values(): void
+    {
+        $cr = User::factory()->create(['role' => 'cr']);
+        $student = User::factory()->create([
+            'role' => 'student',
+            'roll_number' => '22601222274',
+        ]);
+        Subject::query()->create(['name' => 'PHP', 'code' => 'PHP']);
+        config([
+            'services.google_sheets.attendance.spreadsheet_id' => 'attendance-sheet',
+            'services.google_sheets.attendance.range' => "'CLASS Attendance'!B6:ZZ",
+            'services.google_sheets.attendance.activation_range' => "'CLASS Attendance'!B5:ZZ5",
+            'services.google_sheets.attendance.subject_code' => 'PHP',
+            'services.google_sheets.attendance.date_format' => 'd/m',
+            'services.google_sheets.attendance.year' => 2026,
+        ]);
+        $reader = $this->mock(GoogleSheetsReader::class);
+        $reader->shouldReceive('values')
+            ->once()
+            ->with('attendance-sheet', "'CLASS Attendance'!B6:ZZ")
+            ->andReturn([
+                ['Roll Number', 'Student', 'YES', 'NO', '%', '11/08'],
+                ['22601222274', 'Demo Student', '1', '1', '50%', 'PRESENT'],
+            ]);
+        $reader->shouldReceive('values')
+            ->once()
+            ->with('attendance-sheet', "'CLASS Attendance'!B5:ZZ5")
+            ->andReturn([['', '', '', '', '', 'TRUE']]);
+        Sanctum::actingAs($cr);
+
+        $this->postJson('/api/attendance/sync')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'The Google Sheet contains invalid attendance data.')
+            ->assertJsonPath('errors.sheet.0', 'Row 7, column G must contain a checked or unchecked checkbox.');
+
+        $this->assertDatabaseMissing('attendance', ['user_id' => $student->id]);
+    }
+
+    public function test_attendance_sync_reports_google_sheets_api_failures_as_bad_gateway(): void
+    {
+        $cr = User::factory()->create(['role' => 'cr']);
+        config([
+            'services.google_sheets.attendance.spreadsheet_id' => 'attendance-sheet',
+            'services.google_sheets.attendance.range' => "'CLASS Attendance'!B6:ZZ",
+            'services.google_sheets.attendance.activation_range' => "'CLASS Attendance'!B5:ZZ5",
+            'services.google_sheets.attendance.subject_code' => 'PHP',
+        ]);
+        $this->mock(GoogleSheetsReader::class)
+            ->shouldReceive('values')
+            ->once()
+            ->andThrow(new GoogleSheetsApiException('The Google Sheets request failed.'));
+        Sanctum::actingAs($cr);
+
+        $this->postJson('/api/attendance/sync')
+            ->assertStatus(502)
+            ->assertJson(['message' => 'The Google Sheets API request failed.']);
     }
 
     public function test_cr_can_sync_roster_and_assign_one_teacher_to_theory_and_lab_subjects(): void

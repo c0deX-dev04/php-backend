@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Services\AttendanceSheetSyncService;
+use App\Services\GoogleSheetsApiException;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -21,14 +21,14 @@ class AttendanceController extends Controller
         try {
             return response()->json([
                 'message' => 'Attendance synchronized.',
-                'records_synced' => $service->sync(),
+                ...$service->sync(),
             ]);
         } catch (ValidationException $exception) {
             return response()->json([
                 'message' => 'The Google Sheet contains invalid attendance data.',
                 'errors' => $exception->errors(),
             ], 422);
-        } catch (RequestException) {
+        } catch (GoogleSheetsApiException) {
             return response()->json(['message' => 'The Google Sheets API request failed.'], 502);
         } catch (RuntimeException $exception) {
             return response()->json(['message' => $exception->getMessage()], 503);

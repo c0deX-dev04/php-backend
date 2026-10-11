@@ -4,7 +4,6 @@ namespace App\Services;
 
 use Google\Client;
 use Google\Service\Sheets;
-use RuntimeException;
 use Throwable;
 
 class GoogleSheetsReader
@@ -27,7 +26,7 @@ class GoogleSheetsReader
 
             return $sheets->spreadsheets_values->get($spreadsheetId, $range)->getValues() ?? [];
         } catch (Throwable $exception) {
-            throw new RuntimeException('The Google Sheets request failed.', previous: $exception);
+            throw new GoogleSheetsApiException('The Google Sheets request failed.', previous: $exception);
         }
     }
 }
